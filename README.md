@@ -1,77 +1,60 @@
 # hitokoto-sign-plugin
 
-云崽/LLOneBot 自动签名插件，自用。
+自动获取一言内容，定时更新 QQ 个性签名和 QQ 空间说说的插件。
 
-> [!TIP]
-> 一言 API：[https://v1.hitokoto.cn](https://v1.hitokoto.cn)
+## 支持协议端
 
-> [!WARNING]
-> 仅支持 LLOneBot / NapCatQQ 等 OneBot11 协议端
+| 协议端 | 文件 | 签名 | 说说 |
+|--------|------|------|------|
+| LLOneBot | `app/autosign-llonebot.js` | ✅ | ❌ |
+| Napcat | `app/napcat-hitokoto.js` | ✅ | ✅ |
 
-## 目录结构
+## 安装
 
-```
-hitokoto-sign-plugin/
-├── app/
-│   └── autosign.js          # LLOneBot 版本（主入口）
-├── example/
-│   └── napcat自动说说2.0.js  # Napcat 版本（参考示例）
-└── README.md
-```
+将对应协议端的 `.js` 文件放入 TRSSYz 的 `plugins` 目录。
 
-| 文件 | 协议端 | 指令前缀 | 说明 |
-|---|---|---|---|
-| `app/autosign.js` | LLOneBot | `#一言` | 签名更新 + 私聊推送 |
-| `example/napcat自动说说2.0.js` | Napcat | `#nap` | 签名 + 说说发送 |
+## 配置
 
-## 安装与更新 🔧
+首次启动后自动生成 `config.json`，可手动编辑：
 
-### TRSS-Yunzai / Yunzai-Bot 🚀
-
-```bash
-git clone --depth=1 https://github.com/GithubMrDior/hitokoto-sign-plugin ./plugins/hitokoto-sign-plugin/
+```json
+{
+  "signCron": "0 */6 * * ?",
+  "shuoshuoCron": "0 */2 * * ?",
+  "enableSignUpdate": true,
+  "enableShuoshuoUpdate": true,
+  "hitokotoApi": "https://v1.hitokoto.cn",
+  "napcatHttp": "http://127.0.0.1:3004/",
+  "napcatToken": "你的token",
+  "masterQq": "你的QQ号"
+}
 ```
 
-### 安装依赖 📦
-
-```bash
-pnpm install --filter=hitokoto-sign-plugin
-```
-
-## 功能说明
-
-- **自动更新签名**：定时获取一言，自动更新 QQ 个性签名
-- **自动推送说说**：定时私聊推送一言内容（LLOneBot 暂不支持 Qzone）
-- **指令控制**：支持开启/关闭、立即更新、修改定时等
-
-## 常用指令
+## 指令
 
 | 指令 | 说明 |
-|---|---|
-| `#一言帮助` | 查看帮助 |
-| `#一言签名开启/关闭` | 开关签名更新 |
-| `#一言说说开启/关闭` | 开关说说推送 |
-| `#一言立即更新签名` | 立即更新签名 |
-| `#一言立即更新说说` | 立即推送说说 |
-| `#设置签名时间 cron表达式` | 修改签名频率 |
-| `#设置说说时间 cron表达式` | 修改推送频率 |
-| `#一言插件状态` | 查看当前状态 |
+|------|------|
+| `#nap签名开启/关闭` | 开关签名自动更新 |
+| `#nap说说开启/关闭` | 开关说说自动发送 |
+| `#nap立即更新签名` | 立即更新签名 |
+| `#nap立即更新说说` | 立即发布说说 |
+| `#nap设置签名频率 0 */6 * * ?` | 设置签名更新频率 |
+| `#nap设置说说频率 0 */2 * * ?` | 设置说说发送频率 |
+| `#nap插件状态` | 查看当前配置 |
 
-## Cron 表达式说明
+## 常用 Cron 表达式
 
-| 效果 | 表达式 |
-|---|---|
-| 每小时 | `0 0 * * * *` |
-| 每2小时 | `0 0 */2 * * *` |
-| 每6小时 | `0 0 */6 * * *` |
-| 每天12点 | `0 0 12 * * *` |
-| 每30分钟 | `0 */30 * * * *` |
+| 表达式 | 含义 |
+|--------|------|
+| `0 */2 * * * ?` | 每2小时 |
+| `0 */6 * * * ?` | 每6小时 |
+| `0 0 12 * * ?` | 每天12:00 |
+| `0 30 9 * * ?` | 每天9:30 |
 
-## 加速地址
+## 依赖
 
-1. https://gh-proxy.com/
-2. https://ghfast.top/
-
-## 贡献者 👨‍💻
-
-[GithubMrDior](https://github.com/GithubMrDior)
+- TRSSYz 框架
+- LLOneBot / Napcat (OneBot11 协议端)
+- node-schedule
+- node-fetch
+- moment
