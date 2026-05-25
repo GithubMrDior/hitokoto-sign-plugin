@@ -1,4 +1,4 @@
-S/**
+/**
  * 插件：自动一言签名与说说（Napcat）
  * 功能：定时获取一言内容，自动更新QQ签名和发送说说
  * 作者：Assistant
@@ -12,55 +12,65 @@ import fs from 'fs'
 import path from 'path'
 import moment from 'moment'
 
-// 定义插件目录
-const dirPath = path.join('./plugins/napcat-hitokoto/')
+// 定义插件目录（自动获取当前文件所在目录）
+import { fileURLToPath } from 'url'
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const dirPath = __dirname.replace(/\\/g, '/') + '/'
 
 // 确保插件目录存在
 if (!fs.existsSync(dirPath)) {
   fs.mkdirSync(dirPath, { recursive: true })
 }
 
-// 配置文件路径
-const configPath = path.join(dirPath, 'config.json')
-
 // 默认配置
 const defaultConfig = {
-  // 签名更新频率（cron表达式）默认每6小时
   signCron: '0 0 */6 * * ?',
-  // 说说更新频率（cron表达式）默认每天中午12点
   shuoshuoCron: '0 0 */2 * * ?',
-  // 是否启用签名更新
   enableSignUpdate: true,
-  // 是否启用说说更新
   enableShuoshuoUpdate: true,
-  // 一言API地址
   hitokotoApi: 'https://v1.hitokoto.cn',
-  // 一言类型
   hitokotoType: '',
-  // 签名前缀
   signPrefix: '',
-  // 说说前缀
   shuoshuoPrefix: '分享一条一言：',
-  // Napcat HTTP 地址
-  napcatHttp: 'http://127.0.0.1:3004/',
-  // Napcat Token
+  napcatHttp: 'http://127.0.0.1:3010/',
   napcatToken: '775825',
-  // 主人QQ（降级私聊用）
-  masterQq: '1390963734'
+  masterQq: '1390963734',
+  selfQq: ''
 }
 
-// 加载配置
-let config
-try {
-  if (fs.existsSync(configPath)) {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-  } else {
-    config = defaultConfig
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
-  }
-} catch (e) {
-  console.error('[Napcat-Hitokoto] 配置文件加载失败，使用默认配置', e)
-  config = defaultConfig
+// 每个 Bot 独立配置
+function getConfigPath(selfQq) {
+  return path.join(dirPath, `config-${selfQq}.json`)
+}
+
+function loadConfig(selfQq) {
+  const configPath = getConfigPath(selfQq)
+  try {
+    if (fs.existsSync(configPath)) {
+      return { ...defaultConfig, ...JSON.parse(fs.readFileSync(configPath, 'utf8')) }
+    }
+  } catch (e) {}
+  const cfg = { ...defaultConfig, selfQq }
+  try { fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8') } catch (e) {}
+  return cfg
+}
+
+function saveConfig(selfQq, config) {
+  try { fs.writeFileSync(getConfigPath(selfQq), JSON.stringify(config, null, 2), 'utf8') } catch (e) {}
+}
+
+// 兼容旧版 config.json
+const legacyConfigPath = path.join(dirPath, 'config.json')
+if (fs.existsSync(legacyConfigPath)) {
+  try {
+    const legacy = JSON.parse(fs.readFileSync(legacyConfigPath, 'utf8'))
+    if (legacy.selfQq) {
+      saveConfig(legacy.selfQq, { ...defaultConfig, ...legacy })
+      fs.renameSync(legacyConfigPath, legacyConfigPath + '.bak')
+      console.log('[Napcat-Hitokoto] 已迁移旧配置到 config-' + legacy.selfQq + '.json')
+    }
+  } catch (e) {}
 }
 
 export class NapcatHitokotoPlugin extends plugin {
@@ -71,66 +81,52 @@ export class NapcatHitokotoPlugin extends plugin {
       event: 'message',
       priority: 5001,
       rule: [
-        {
-          reg: '^#nap(签名|说说)(开启|关闭)$',
-          fnc: 'toggleFeature'
-        },
-        {
-          reg: '^#nap立即更新(签名|说说)$',
-          fnc: 'updateNow'
-        },
-        {
-          reg: '^#nap插件状态$',
-          fnc: 'showStatus'
-        },
-        {
-          reg: '^#nap设置(签名|说说)频率 (.+)$',
-          fnc: 'setCron'
-        },
-        {
-          reg: '^#nap设置(签名|说说)前缀(.*)$',
-          fnc: 'setPrefix'
-        }
+        { reg: '^#nap(签名|说说)(开启|关闭)$', fnc: 'toggleFeature' },
+        { reg: '^#nap立即更新(签名|说说)$', fnc: 'updateNow' },
+        { reg: '^#nap插件状态$', fnc: 'showStatus' },
+        { reg: '^#nap设置(签名|说说)频率 (.+)$', fnc: 'setCron' },
+        { reg: '^#nap设置(签名|说说)前缀(.*)$', fnc: 'setPrefix' }
       ]
     })
-
-    this.init()
+    this._jobs = {}
+    this._updating = new Set()
+    this._botUinCache = {}
   }
 
-  async init() {
-    this.refreshSchedule()
-    console.log('[Napcat-Hitokoto] 初始化完成')
+  getConfig(e) {
+    const selfQq = e?.bot?.self_id || e?.self_id || ''
+    return loadConfig(selfQq)
   }
 
-  refreshSchedule() {
-    if (this.signJob) {
-      this.signJob.cancel()
-    }
-    if (this.shuoshuoJob) {
-      this.shuoshuoJob.cancel()
-    }
+  getSelfQq(e) {
+    return e?.bot?.self_id || e?.self_id || ''
+  }
 
-    if (config.enableSignUpdate) {
-      this.signJob = schedule.scheduleJob(config.signCron, () => this.updateSign())
-      console.log(`[Napcat-Hitokoto] 签名更新任务已启动，执行周期：${config.signCron}`)
-    }
+  refreshSchedule(selfQq, cfg) {
+    if (!selfQq) return
+    if (!this._jobs) this._jobs = {}
+    if (this._jobs[selfQq]?.signJob) { this._jobs[selfQq].signJob.cancel() }
+    if (this._jobs[selfQq]?.shuoshuoJob) { this._jobs[selfQq].shuoshuoJob.cancel() }
+    this._jobs[selfQq] = {}
 
-    if (config.enableShuoshuoUpdate) {
-      this.shuoshuoJob = schedule.scheduleJob(config.shuoshuoCron, () => this.updateShuoshuo())
-      console.log(`[Napcat-Hitokoto] 说说更新任务已启动，执行周期：${config.shuoshuoCron}`)
+    if (cfg.enableSignUpdate) {
+      this._jobs[selfQq].signJob = schedule.scheduleJob(cfg.signCron, () => this.updateSign(selfQq, cfg))
+      console.log(`[Napcat-Hitokoto][${selfQq}] 签名任务已启动: ${cfg.signCron}`)
+    }
+    if (cfg.enableShuoshuoUpdate) {
+      this._jobs[selfQq].shuoshuoJob = schedule.scheduleJob(cfg.shuoshuoCron, () => this.updateShuoshuo(selfQq, cfg))
+      console.log(`[Napcat-Hitokoto][${selfQq}] 说说任务已启动: ${cfg.shuoshuoCron}`)
     }
   }
 
-  async getHitokoto() {
+  async getHitokoto(cfg) {
     try {
-      let url = config.hitokotoApi
-      if (config.hitokotoType) {
-        url += `?c=${config.hitokotoType}`
+      let url = cfg.hitokotoApi
+      if (cfg.hitokotoType) {
+        url += `?c=${cfg.hitokotoType}`
       }
-      
       const response = await fetch(url)
       const data = await response.json()
-      
       return {
         content: data.hitokoto,
         from: data.from,
@@ -148,35 +144,44 @@ export class NapcatHitokotoPlugin extends plugin {
     }
   }
 
-  async updateSign(e = null) {
+  async updateSign(selfQq, cfg, e = null) {
+    if (!cfg) cfg = loadConfig(selfQq)
+    const lockKey = `${selfQq}_sign`
+    if (this._updating.has(lockKey)) {
+      console.log(`[Napcat-Hitokoto][${selfQq}] 签名更新进行中，跳过`)
+      return
+    }
+    this._updating.add(lockKey)
     try {
-      const hitokoto = await this.getHitokoto()
+      const hitokoto = await this.getHitokoto(cfg)
       const signText = hitokoto.content
-      
-      const res1 = await this.callNapcat('set_self_longnick', { longNick: signText })
-      console.log('[Napcat] set_self_longnick 响应:', JSON.stringify(res1))
-      
-      const res2 = await this.callNapcat('set_qq_profile', { nickname: '', personal_note: signText })
-      console.log('[Napcat] set_qq_profile 响应:', JSON.stringify(res2))
-      
-      if (e) {
-        e.reply(signText)
-      }
-      this.logHistory('sign', hitokoto)
+      const res1 = await this.callNapcat('set_self_longnick', { longNick: signText }, cfg)
+      console.log(`[Napcat][${selfQq}] set_self_longnick:`, JSON.stringify(res1))
+      const res2 = await this.callNapcat('set_qq_profile', { nickname: '', personal_note: signText }, cfg)
+      console.log(`[Napcat][${selfQq}] set_qq_profile:`, JSON.stringify(res2))
+      if (e) e.reply(signText)
+      this.logHistory('sign', hitokoto, selfQq)
     } catch (err) {
-      console.error('[Napcat] 更新签名失败:', err.message || err)
+      console.error(`[Napcat][${selfQq}] 更新签名失败:`, err.message || err)
       if (e) e.reply('更新签名失败：' + (err.message || err))
+    } finally {
+      setTimeout(() => this._updating.delete(lockKey), 30000)
     }
   }
 
-  async updateShuoshuo(e = null) {
+  async updateShuoshuo(selfQq, cfg, e = null) {
+    if (!cfg) cfg = loadConfig(selfQq)
+    const lockKey = `${selfQq}_shuoshuo`
+    if (this._updating.has(lockKey)) {
+      console.log(`[Napcat-Hitokoto][${selfQq}] 说说发送进行中，跳过`)
+      return
+    }
+    this._updating.add(lockKey)
     try {
-      const hitokoto = await this.getHitokoto()
+      const hitokoto = await this.getHitokoto(cfg)
       const content = hitokoto.content
-      
-      const result = await this.publishQzone(content)
-      console.log('[Napcat] QZone发布结果:', JSON.stringify(result))
-      
+      const result = await this.publishQzone(content, cfg)
+      console.log(`[Napcat][${selfQq}] QZone发布结果:`, JSON.stringify(result))
       if (e) {
         if (result.code === 0 || result.note) {
           e.reply(content)
@@ -184,10 +189,12 @@ export class NapcatHitokotoPlugin extends plugin {
           e.reply(`❌ 说说发布失败：${result.message || JSON.stringify(result)}`)
         }
       }
-      this.logHistory('shuoshuo', hitokoto)
+      this.logHistory('shuoshuo', hitokoto, selfQq)
     } catch (err) {
-      console.error('[Napcat] 发送说说失败:', err.message || err)
+      console.error(`[Napcat][${selfQq}] 发送说说失败:`, err.message || err)
       if (e) e.reply('发送说说失败：' + (err.message || err))
+    } finally {
+      setTimeout(() => this._updating.delete(lockKey), 30000)
     }
   }
 
@@ -201,9 +208,10 @@ export class NapcatHitokotoPlugin extends plugin {
   }
 
   /** 通过 QZone HTTP API 发布空间说说 */
-  async publishQzone(content) {
+  async publishQzone(content, cfg) {
+    if (!cfg) cfg = defaultConfig
     // 1. 获取 QZone 域名的 Cookie
-    const cookieRes = await this.callNapcat('get_cookies', { domain: 'qzone.qq.com' })
+    const cookieRes = await this.callNapcat('get_cookies', { domain: 'qzone.qq.com' }, cfg)
     if (cookieRes.retcode !== 0 || !cookieRes.data?.cookies) {
       throw new Error('获取QZone Cookie失败: ' + JSON.stringify(cookieRes))
     }
@@ -214,12 +222,12 @@ export class NapcatHitokotoPlugin extends plugin {
     if (!pSkeyMatch) throw new Error('Cookie中未找到p_skey')
     const gtk = this.calcGTK(pSkeyMatch[1])
 
-    // 3. 获取 Bot QQ 号（缓存）
-    let uin = this._botUin
+    // 3. 获取 Bot QQ 号（按 cfg 缓存）
+    let uin = this._botUinCache[cfg.napcatHttp]
     if (!uin) {
-      const infoRes = await this.callNapcat('get_login_info', {})
+      const infoRes = await this.callNapcat('get_login_info', {}, cfg)
       if (infoRes.retcode === 0 && infoRes.data?.user_id) {
-        uin = this._botUin = infoRes.data.user_id
+        uin = this._botUinCache[cfg.napcatHttp] = infoRes.data.user_id
       } else {
         throw new Error('获取Bot QQ号失败')
       }
@@ -250,7 +258,6 @@ export class NapcatHitokotoPlugin extends plugin {
       body
     })
     const text = await res.text()
-    // QZone API 返回的是 callback(JSON) 格式，需要提取 JSON 部分
     const match = text.match(/_Callback\(([\s\S]*)\)/)
     if (match) {
       try {
@@ -259,11 +266,9 @@ export class NapcatHitokotoPlugin extends plugin {
         return { code: 0, raw: text }
       }
     }
-    // 也可能是纯 JSON 或 HTML 错误页
     try {
       return JSON.parse(text)
     } catch {
-      // 如果包含 html 但说说实际已发布成功
       if (text.includes('html') || text.includes('<!DOCTYPE')) {
         return { code: 0, note: 'HTML响应，可能已发布成功' }
       }
@@ -271,20 +276,20 @@ export class NapcatHitokotoPlugin extends plugin {
     }
   }
 
-  async callNapcat(action, params) {
+  async callNapcat(action, params, cfg) {
+    if (!cfg) cfg = defaultConfig
     const headers = { 'Content-Type': 'application/json' }
-    if (config.napcatToken) {
-      headers['Authorization'] = `Bearer ${config.napcatToken}`
+    if (cfg.napcatToken) {
+      headers['Authorization'] = `Bearer ${cfg.napcatToken}`
     }
-    const url = config.napcatHttp + action
+    const url = cfg.napcatHttp + action
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(params) })
     return res.json()
   }
 
-  logHistory(type, hitokoto) {
-    const historyPath = path.join(dirPath, 'history.json')
+  logHistory(type, hitokoto, selfQq) {
+    const historyPath = path.join(dirPath, `history-${selfQq}.json`)
     let history = []
-    
     if (fs.existsSync(historyPath)) {
       try {
         history = JSON.parse(fs.readFileSync(historyPath, 'utf8'))
@@ -292,7 +297,6 @@ export class NapcatHitokotoPlugin extends plugin {
         console.error('[Napcat-Hitokoto] 读取历史记录失败', e)
       }
     }
-    
     history.push({
       type,
       content: hitokoto.content,
@@ -300,11 +304,9 @@ export class NapcatHitokotoPlugin extends plugin {
       from_who: hitokoto.from_who,
       time: moment().format('YYYY-MM-DD HH:mm:ss')
     })
-    
     if (history.length > 100) {
       history = history.slice(-100)
     }
-    
     try {
       fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf8')
     } catch (e) {
@@ -313,135 +315,67 @@ export class NapcatHitokotoPlugin extends plugin {
   }
 
   async toggleFeature(e) {
-    if (!e.isMaster) {
-      e.reply('只有主人才能操作哦~')
-      return
-    }
-
+    if (!e.isMaster) return e.reply('只有主人才能操作哦~')
+    const selfQq = this.getSelfQq(e)
+    const cfg = this.getConfig(e)
     const m = e.msg.match(/^#nap(签名|说说)(开启|关闭)$/)
     const command = m[1]
     const action = m[2]
-    
-    if (command === '签名') {
-      config.enableSignUpdate = action === '开启'
-      if (this.signJob) {
-        this.signJob.cancel()
-        this.signJob = null
-      }
-      if (config.enableSignUpdate) {
-        this.signJob = schedule.scheduleJob(config.signCron, () => this.updateSign())
-      }
-      e.reply(`QQ签名自动更新已${action}`)
-    } else if (command === '说说') {
-      config.enableShuoshuoUpdate = action === '开启'
-      if (this.shuoshuoJob) {
-        this.shuoshuoJob.cancel()
-        this.shuoshuoJob = null
-      }
-      if (config.enableShuoshuoUpdate) {
-        this.shuoshuoJob = schedule.scheduleJob(config.shuoshuoCron, () => this.updateShuoshuo())
-      }
-      e.reply(`QQ说说自动发送已${action}`)
-    }
-    
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    if (command === '签名') cfg.enableSignUpdate = action === '开启'
+    else cfg.enableShuoshuoUpdate = action === '开启'
+    saveConfig(selfQq, cfg)
+    this.refreshSchedule(selfQq, cfg)
+    e.reply(`${command}自动更新已${action}`)
   }
 
   async updateNow(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
-
+    const selfQq = this.getSelfQq(e)
+    const cfg = this.getConfig(e)
     const type = e.msg.match(/^#nap立即更新(签名|说说)$/)[1]
-    
     if (type === '签名') {
-      e.reply('正在更新签名...')
-      await this.updateSign(e)
-    } else if (type === '说说') {
-      e.reply('正在发送说说...')
-      await this.updateShuoshuo(e)
+      await this.updateSign(selfQq, cfg, e)
+    } else {
+      await this.updateShuoshuo(selfQq, cfg, e)
     }
   }
 
   async showStatus(e) {
-    if (!e.isMaster) {
-      e.reply('只有主人才能操作哦~')
-      return
-    }
-    
-    const status = `Napcat-Hitokoto 插件状态：
-签名自动更新：${config.enableSignUpdate ? '已开启' : '已关闭'}
-签名更新周期：${config.signCron}
-签名前缀：${config.signPrefix}
-
-说说自动发送：${config.enableShuoshuoUpdate ? '已开启' : '已关闭'}
-说说发送周期：${config.shuoshuoCron}
-说说前缀：${config.shuoshuoPrefix}
-
-一言API：${config.hitokotoApi}
-一言类型：${config.hitokotoType || '随机'}`
-    
-    e.reply(status)
+    if (!e.isMaster) return e.reply('只有主人才能操作哦~')
+    const selfQq = this.getSelfQq(e)
+    const cfg = this.getConfig(e)
+    e.reply(`Napcat-Hitokoto 插件状态 [${selfQq}]：
+签名：${cfg.enableSignUpdate ? '✅' : '❌'} | ${cfg.signCron} | 前缀:${cfg.signPrefix}
+说说：${cfg.enableShuoshuoUpdate ? '✅' : '❌'} | ${cfg.shuoshuoCron} | 前缀:${cfg.shuoshuoPrefix}
+一言API：${cfg.hitokotoApi} | 类型：${cfg.hitokotoType || '随机'}`)
   }
 
   async setCron(e) {
-    if (!e.isMaster) {
-      e.reply('只有主人才能操作哦~')
-      return
-    }
-
+    if (!e.isMaster) return e.reply('只有主人才能操作哦~')
+    const selfQq = this.getSelfQq(e)
+    const cfg = this.getConfig(e)
     const match = e.msg.match(/^#nap设置(签名|说说)频率 (.+)$/)
     const type = match[1]
     const cronExp = match[2].trim()
-
-    // 验证 cron 表达式
-    try {
-      schedule.scheduleJob(cronExp, () => {})
-    } catch {
-      e.reply('cron格式无效，请重新输入\n常用示例：\n0 */2 * * * ?  每2小时\n0 0 */6 * * ?  每6小时\n0 0 12 * * ?  每天12点\n0 30 9 * * ?  每天9:30')
-      return
+    try { schedule.scheduleJob(cronExp, () => {}) } catch {
+      return e.reply('cron格式无效，请重新输入')
     }
-
-    if (type === '签名') {
-      config.signCron = cronExp
-      if (this.signJob) {
-        this.signJob.cancel()
-        this.signJob = null
-      }
-      if (config.enableSignUpdate) {
-        this.signJob = schedule.scheduleJob(cronExp, () => this.updateSign())
-      }
-      e.reply(`签名频率已设为：${cronExp}`)
-    } else if (type === '说说') {
-      config.shuoshuoCron = cronExp
-      if (this.shuoshuoJob) {
-        this.shuoshuoJob.cancel()
-        this.shuoshuoJob = null
-      }
-      if (config.enableShuoshuoUpdate) {
-        this.shuoshuoJob = schedule.scheduleJob(cronExp, () => this.updateShuoshuo())
-      }
-      e.reply(`说说频率已设为：${cronExp}`)
-    }
-
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    if (type === '签名') cfg.signCron = cronExp
+    else cfg.shuoshuoCron = cronExp
+    saveConfig(selfQq, cfg)
+    this.refreshSchedule(selfQq, cfg)
+    e.reply(`[${selfQq}] ${type}频率已设为：${cronExp}`)
   }
 
   async setPrefix(e) {
-    if (!e.isMaster) {
-      e.reply('只有主人才能操作哦~')
-      return
-    }
-
-    const type = e.msg.match(/^#nap设置(签名|说说)前缀(.*)$/)[1]
-    const prefix = e.msg.match(/^#nap设置(签名|说说)前缀(.*)$/)[2]
-    
-    if (type === '签名') {
-      config.signPrefix = prefix
-      e.reply(`签名前缀已设置为：${prefix}`)
-    } else if (type === '说说') {
-      config.shuoshuoPrefix = prefix
-      e.reply(`说说前缀已设置为：${prefix}`)
-    }
-    
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    if (!e.isMaster) return e.reply('只有主人才能操作哦~')
+    const selfQq = this.getSelfQq(e)
+    const cfg = this.getConfig(e)
+    const m = e.msg.match(/^#nap设置(签名|说说)前缀(.*)$/)
+    const type = m[1], prefix = m[2]
+    if (type === '签名') cfg.signPrefix = prefix
+    else cfg.shuoshuoPrefix = prefix
+    saveConfig(selfQq, cfg)
+    e.reply(`[${selfQq}] ${type}前缀已设为：${prefix}`)
   }
 }
