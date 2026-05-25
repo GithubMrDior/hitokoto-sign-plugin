@@ -24,6 +24,16 @@
 
 ## 安装 🔧
 
+### TRSS-Yunzai 🚀
+
+```bash
+# 直接克隆
+git clone --depth=1 https://github.com/YUYUYUYU2147/napcat-hitokoto ./plugins/napcat-hitokoto/
+
+# 国内加速
+git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/napcat-hitokoto ./plugins/napcat-hitokoto/
+```
+
 将 `index.js` 放入 TRSS-Yunzai 的 `plugins/napcat-hitokoto/` 目录：
 
 ```bash
