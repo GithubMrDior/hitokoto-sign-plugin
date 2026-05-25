@@ -157,6 +157,12 @@ plugins/napcat-hitokoto/
 | 说说重复发送 | 多 Bot 启动时触发多次 init | 已通过执行锁修复 |
 | 获取 Cookie 失败 | Bot 未登录 QZone | 确保 Bot 已登录 QQ 且可访问 QZone |
 
+## 贡献者 ✨
+
+<a href="https://github.com/YUYUYUYU2147/hitokoto-sign-plugin/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=YUYUYUYU2147/hitokoto-sign-plugin" />
+</a>
+
 ## 依赖
 
 - TRSS-Yunzai 框架
