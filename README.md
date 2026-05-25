@@ -12,15 +12,14 @@
 
 > ⚠️ **Warning**
 >
-> 仅支持 **NapCatQQ** 协议端，依赖 NapCat 的 HTTP 服务。
+> 支持 **NapCatQQ** 和 **LLOneBot** 协议端，请根据你的协议端选择对应文件。
 
-## 特性
+## 支持协议端
 
-- 定时更新 QQ 个性签名（set_self_longnick + set_qq_profile）
-- 定时发表 QQ 空间说说（QZone HTTP API）
-- 多 Bot 独立配置，互不干扰
-- 执行锁机制，防止重复发送
-- 自动获取 Cookie 并计算 g_tk，直接调用 QZone 说说 API
+| 协议端 | 文件 | 签名 | 说说 |
+|--------|------|------|------|
+| NapCat | `napcat-hitokoto.js` | ✅ | ✅（QQ 空间） |
+| LLOneBot | `autosign-llonebot.js` | ✅ | ✅（自动降级私聊） |
 
 ## 安装 🔧
 
@@ -34,10 +33,14 @@ git clone --depth=1 https://github.com/YUYUYUYU2147/hitokoto-sign-plugin ./plugi
 git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/hitokoto-sign-plugin ./plugins/hitokoto-sign-plugin/
 ```
 
-然后复制文件到 plugins 目录：
+然后复制对应协议端的文件到 plugins 目录：
 
 ```bash
+# NapCat 用户
 cp plugins/hitokoto-sign-plugin/app/napcat-hitokoto.js plugins/napcat-hitokoto.js
+
+# LLOneBot 用户
+cp plugins/hitokoto-sign-plugin/app/autosign-llonebot.js plugins/autosign-llonebot.js
 ```
 
 无需额外安装依赖（依赖 TRSS-Yunzai 已有的 node-fetch、node-schedule、moment）。
@@ -109,6 +112,8 @@ plugins/
 
 ## 指令
 
+### NapCat（签名 + 说说）
+
 | 指令 | 说明 | 权限 |
 |------|------|------|
 | `#nap签名开启` / `#nap签名关闭` | 开关签名自动更新 | 主人 |
@@ -121,6 +126,28 @@ plugins/
 | `#nap设置签名前缀<前缀>` | 设置签名前缀 | 主人 |
 | `#nap设置说说前缀<前缀>` | 设置说说前缀 | 主人 |
 
+### LLOneBot（签名 + 说说）
+
+> ⚠️ **Note**
+>
+> LLOneBot 不支持直接发 QQ 空间说说，说说会自动降级为私聊发送给主人。
+
+| 指令 | 说明 | 权限 |
+|------|------|------|
+| `#一言帮助` | 显示帮助 | 主人 |
+| `#一言签名开启` / `#一言签名关闭` | 开关签名自动更新 | 主人 |
+| `#一言说说开启` / `#一言说说关闭` | 开关说说自动发送 | 主人 |
+| `#一言立即更新签名` | 立即更新签名 | 主人 |
+| `#一言立即更新说说` | 立即发布说说 | 主人 |
+| `#一言插件状态` | 查看当前配置 | 主人 |
+| `#一言说说模式 qzone/private` | 设置说说模式 | 主人 |
+| `#设置签名前缀xxx` | 设置签名前缀 | 主人 |
+| `#设置说说前缀xxx` | 设置说说前缀 | 主人 |
+| `#设置签名时间 0 0 */6 * * *` | 设置签名 Cron（6位） | 主人 |
+| `#设置说说时间 0 0 * * * *` | 设置说说 Cron（6位） | 主人 |
+| `#一言全量扫描` | 扫描协议方法 | 主人 |
+| `#一言扫描协议` | 扫描协议层 | 主人 |
+
 ## 常用 Cron 表达式（7位）
 
 | 表达式 | 含义 |
@@ -132,7 +159,7 @@ plugins/
 | `0 0 8 * * ?` | 每天8:00 |
 | `0 0 0 * * ?` | 每天0:00 |
 
-## 架构说明
+## 架构说明（NapCat 版）
 
 ### 多 Bot 隔离
 
