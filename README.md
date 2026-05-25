@@ -55,7 +55,7 @@ cp index.js plugins/napcat-hitokoto/index.js
     "host": "0.0.0.0",
     "port": 3010
   },
-  "token": "775825"
+  "token": "你的token"
 }
 ```
 
@@ -89,8 +89,8 @@ plugins/napcat-hitokoto/
   "signPrefix": "",
   "shuoshuoPrefix": "分享一条一言：",
   "napcatHttp": "http://127.0.0.1:3010/",
-  "napcatToken": "775825",
-  "masterQq": "1390963734",
+  "napcatToken": "你的token",
+  "masterQq": "你的QQ号",
   "selfQq": ""
 }
 ```
